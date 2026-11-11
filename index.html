@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Milkman Media</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#F7F6F2;color:#1B1F23;font-size:15px}
+a{color:inherit}
+.shell{display:flex;flex-wrap:wrap;min-height:100vh}
+.side{flex:0 0 220px;background:#fff;border-right:1px solid #E4E2DA;padding:24px 16px;display:flex;flex-direction:column;gap:24px}
+.brand{font-weight:600;font-size:17px;padding:0 8px}
+.nav{display:flex;flex-direction:column;gap:4px}
+.nav button{all:unset;cursor:pointer;padding:10px 12px;border-radius:8px;font-size:14px;color:#3B4148}
+.nav button.on{background:#2F6B5A;color:#fff;font-weight:600}
+.nav button:focus-visible{outline:2px solid #2F6B5A;outline-offset:2px}
+.main{flex:999 1 560px;min-width:0;padding:32px;max-width:1100px}
+h1{margin:0 0 4px;font-size:26px;font-weight:600;letter-spacing:-0.02em}
+.sub{margin:0 0 20px;color:#5B6168}
+.card{background:#fff;border:1px solid #E4E2DA;border-radius:12px;padding:20px;margin-bottom:20px}
+.row{display:flex;flex-wrap:wrap;gap:16px}
+.field{flex:1 1 200px;display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+label{font-size:13px;font-weight:500;color:#3B4148}
+input,select,textarea{font:inherit;padding:10px 12px;border:1px solid #CFCDC4;border-radius:8px;background:#FBFBF9;color:#1B1F23;width:100%}
+textarea{resize:vertical}
+.btn{font:inherit;font-weight:600;padding:11px 18px;border-radius:8px;border:0;background:#2F6B5A;color:#fff;cursor:pointer}
+.btn.alt{background:#fff;color:#1B1F23;border:1px solid #CFCDC4;font-weight:500}
+.btn:disabled{opacity:.6;cursor:default}
+.money{background:#F7F6F2;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;margin:6px 0 16px;font-size:14px}
+.money div{display:flex;justify-content:space-between;gap:12px}
+.money .t{font-weight:600;border-top:1px solid #DAD8CF;padding-top:8px}
+.mut{color:#5B6168}
+.msg{padding:10px 12px;border-radius:8px;font-size:14px;margin-bottom:14px}
+.msg.err{background:#FCE9E6;color:#8A2A1B}
+.msg.ok{background:#E3F1EB;color:#1F4A3D}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:12px;font-weight:500;color:#5B6168;padding:10px 12px}
+td{padding:12px;border-top:1px solid #E4E2DA}
+tr.pick{cursor:pointer}
+tr.pick:hover,tr.sel{background:#EEF4F1}
+.chip{padding:3px 10px;border-radius:999px;background:#E4E2DA;font-size:12px;font-weight:500}
+.scroll{overflow-x:auto}
+.cols{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.cols>.l{flex:999 1 460px;min-width:0}
+.cols>.r{flex:1 1 320px;min-width:0}
+.login{max-width:380px;margin:12vh auto;padding:0 20px}
+.btnrow{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
+h2{font-size:16px;margin:0 0 12px}
+.small{font-size:13px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const SUPABASE_URL = 'https://lzsmrzmdthpdyqgkqspg.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_KJmQSPjXJXw9o604N2PO5w_TVwNsnOc';
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const CATS = {
+  photo_editing: 'Photo editing',
+  iguide: 'iGuide',
+  video_outsourcing: 'Video outsourcing',
+  virtual_staging: 'Virtual staging',
+  mileage: 'Mileage',
+  other: 'Other'
+};
+const STATUSES = ['booked', 'shot', 'edited', 'delivered', 'invoiced', 'paid'];
+
+const S = { tab: 'booking', settings: null, agents: [], shoots: [], sel: null, expenses: [], done: null, notice: null };
+const app = document.getElementById('app');
+
+const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = (v) => '$' + (Number(v) || 0).toFixed(2);
+const num = (v) => parseFloat(v) || 0;
+const $ = (id) => document.getElementById(id);
+const fmtDate = (iso) => new Date(iso).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+function calc(price, sqft) {
+  const st = S.settings || { hst_rate: 0.13, tax_setaside_rate: 0.25, iguide_base_fee: 48, iguide_base_sqft: 1500, iguide_cost_per_sqft: 0.032, iguide_charge_per_sqft: 0.065 };
+  const sq = num(sqft);
+  const iguideCharge = sq * Number(st.iguide_charge_per_sqft);
+  const iguideCost = sq > 0 ? Number(st.iguide_base_fee) + Math.max(0, sq - Number(st.iguide_base_sqft)) * Number(st.iguide_cost_per_sqft) : 0;
+  const subtotal = num(price) + iguideCharge;
+  return {
+    iguideCharge, iguideCost, subtotal,
+    hst: subtotal * Number(st.hst_rate),
+    total: subtotal * (1 + Number(st.hst_rate)),
+    setAside: subtotal * Number(st.tax_setaside_rate),
+    rate: Number(st.hst_rate), setRate: Number(st.tax_setaside_rate)
+  };
+}
+
+function icsDate(d) { return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); }
+function icsText(t) { return String(t || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n'); }
+function downloadIcs(name, title, location, start, end) {
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Milkman Media//EN', 'BEGIN:VEVENT',
+    'UID:' + Date.now() + Math.random().toString(36).slice(2) + '@milkman-media',
+    'DTSTAMP:' + icsDate(new Date()), 'DTSTART:' + icsDate(start), 'DTEND:' + icsDate(end),
+    'SUMMARY:' + icsText(title)];
+  if (location) lines.push('LOCATION:' + icsText(location));
+  lines.push('END:VEVENT', 'END:VCALENDAR');
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name + '.ics';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function loadAll() {
+  const [st, ag, sh] = await Promise.all([
+    db.from('settings').select('*').eq('id', 1).single(),
+    db.from('agents').select('*').order('name'),
+    db.from('shoots').select('*, agents(name)').order('shoot_start', { ascending: false })
+  ]);
+  S.settings = st.data || null;
+  S.agents = ag.data || [];
+  S.shoots = sh.data || [];
+  const err = st.error || ag.error || sh.error;
+  if (err) S.notice = { err: true, text: 'Could not load data: ' + err.message };
+}
+
+function shell(inner) {
+  const tabs = [['booking', 'New booking'], ['shoots', 'Shoots'], ['agents', 'Agents']];
+  return `<div class="shell"><div class="side"><div class="brand">Milkman Media</div>
+  <nav class="nav">${tabs.map(([k, n]) => `<button data-tab="${k}" class="${S.tab === k ? 'on' : ''}">${n}</button>`).join('')}</nav>
+  <div class="nav"><button id="signout">Sign out</button></div></div>
+  <div class="main">${S.notice ? `<div class="msg ${S.notice.err ? 'err' : 'ok'}">${esc(S.notice.text)}</div>` : ''}${inner}</div></div>`;
+}
+
+function bindShell() {
+  document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { S.tab = b.dataset.tab; S.notice = null; S.done = null; render(); }));
+  $('signout').addEventListener('click', async () => { await db.auth.signOut(); });
+}
+
+function renderLogin(msg) {
+  app.innerHTML = `<div class="login"><h1>Milkman Media</h1><p class="sub">Sign in</p>
+  ${msg ? `<div class="msg err">${esc(msg)}</div>` : ''}
+  <form id="lf" class="card"><div class="field"><label for="em">Email</label><input id="em" type="email" autocomplete="username" required></div>
+  <div class="field"><label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password" required></div>
+  <button class="btn" type="submit">Sign in</button></form></div>`;
+  $('lf').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const { error } = await db.auth.signInWithPassword({ email: $('em').value, password: $('pw').value });
+    if (error) renderLogin(error.message);
+  });
+}
+
+function renderBooking() {
+  if (S.done) {
+    const d = S.done;
+    return `<h1>Booked</h1><p class="sub">${esc(d.address)}, ${esc(fmtDate(d.start.toISOString()))}</p>
+    <div class="card"><h2>Next steps</h2><div class="btnrow">
+    <button class="btn" id="dl-apple">Add to Apple Calendar</button>
+    <button class="btn alt" id="dl-work">Download work block</button>
+    <a class="btn alt" style="text-decoration:none;display:inline-block" href="${d.sms}">Text the confirmation</a>
+    <button class="btn alt" id="again">New booking</button></div>
+    <p class="mut small" style="margin-top:14px">The calendar files open in Apple Calendar or Outlook. The work block shows as personal time with 30 minutes either side.</p></div>`;
+  }
+  const agentOpts = '<option value="">Choose an agent</option>' + S.agents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+  return `<h1>New booking</h1><p class="sub">Enter it once. It is saved to your shoot log.</p>
+  <div class="card"><div class="row">
+  <div class="field"><label for="b-agent">Agent</label><select id="b-agent">${agentOpts}</select></div>
+  <div class="field"><label for="b-contact">Contact name, if different</label><input id="b-contact"></div></div>
+  <div class="field"><label for="b-addr">Property address</label><input id="b-addr" autocomplete="street-address"></div>
+  <div class="row"><div class="field"><label for="b-city">City</label><input id="b-city" value="Kitchener"></div>
+  <div class="field"><label for="b-date">Date</label><input id="b-date" type="date"></div>
+  <div class="field"><label for="b-time">Start time</label><input id="b-time" type="time"></div>
+  <div class="field"><label for="b-dur">Hours</label><input id="b-dur" type="number" min="0.5" step="0.5" value="2"></div></div>
+  <div class="row"><div class="field"><label for="b-pkg">Package</label><input id="b-pkg" placeholder="Photos"></div>
+  <div class="field"><label for="b-price">Photography price before HST</label><input id="b-price" inputmode="decimal" value="0"></div>
+  <div class="field"><label for="b-sqft">Square footage, for the iGuide</label><input id="b-sqft" inputmode="numeric" placeholder="1800"></div></div>
+  <div class="field"><label for="b-notes">Notes</label><textarea id="b-notes" rows="2"></textarea></div>
+  <div class="money" id="money"></div>
+  <button class="btn" id="b-save">Create booking</button></div>`;
+}
+
+function updateMoney() {
+  const el = $('money');
+  if (!el) return;
+  const c = calc($('b-price').value, $('b-sqft').value);
+  el.innerHTML = `<div><span class="mut">Photography</span><span>${money(num($('b-price').value))}</span></div>
+  <div><span class="mut">iGuide charged to the client</span><span>${money(c.iguideCharge)}</span></div>
+  <div><span class="mut">HST (${(c.rate * 100).toFixed(0)}%)</span><span>${money(c.hst)}</span></div>
+  <div class="t"><span>Invoice total</span><span>${money(c.total)}</span></div>
+  <div><span class="mut">Your iGuide cost before HST</span><span>${money(c.iguideCost)}</span></div>
+  <div><span class="mut">iGuide margin</span><span>${money(c.iguideCharge - c.iguideCost)}</span></div>
+  <div><span class="mut">Suggested income tax set-aside (${(c.setRate * 100).toFixed(0)}%)</span><span>${money(c.setAside)}</span></div>`;
+}
+
+function bindBooking() {
+  if (S.done) {
+    const d = S.done;
+    $('dl-apple').addEventListener('click', () => downloadIcs('photo-shoot', 'Photo shoot with ' + d.who, d.address, d.start, d.end));
+    $('dl-work').addEventListener('click', () => downloadIcs('work-block', 'Personal time', '', new Date(d.start.getTime() - 30 * 60000), new Date(d.end.getTime() + 30 * 60000)));
+    $('again').addEventListener('click', () => { S.done = null; render(); });
+    return;
+  }
+  updateMoney();
+  ['b-price', 'b-sqft'].forEach((id) => $(id).addEventListener('input', updateMoney));
+  $('b-agent').addEventListener('change', () => {
+    const a = S.agents.find((x) => x.id === $('b-agent').value);
+    if (a) {
+      if (a.usual_package) $('b-pkg').value = a.usual_package;
+      if (a.usual_price != null) $('b-price').value = a.usual_price;
+      updateMoney();
+    }
+  });
+  $('b-save').addEventListener('click', async () => {
+    const addr = $('b-addr').value.trim();
+    if (!addr || !$('b-date').value || !$('b-time').value) { S.notice = { err: true, text: 'Address, date and start time are required.' }; render(); return; }
+    const start = new Date($('b-date').value + 'T' + $('b-time').value);
+    const end = new Date(start.getTime() + num($('b-dur').value || 2) * 3600000);
+    const agent = S.agents.find((x) => x.id === $('b-agent').value);
+    const row = {
+      agent_id: agent ? agent.id : null,
+      contact_name: $('b-contact').value.trim() || null,
+      address: addr,
+      city: $('b-city').value.trim() || null,
+      shoot_start: start.toISOString(),
+      shoot_end: end.toISOString(),
+      package: $('b-pkg').value.trim() || null,
+      price: num($('b-price').value),
+      sqft: $('b-sqft').value ? Math.round(num($('b-sqft').value)) : null,
+      notes: $('b-notes').value.trim() || null
+    };
+    $('b-save').disabled = true;
+    const { error } = await db.from('shoots').insert(row);
+    if (error) { S.notice = { err: true, text: 'Could not save: ' + error.message }; render(); return; }
+    const who = row.contact_name || (agent ? agent.name : 'client');
+    const first = (agent ? agent.name : who).split(' ')[0];
+    const dateText = start.toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' });
+    const timeText = start.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+    const body = `Hi ${first}, you're all set for ${dateText} at ${timeText} at ${addr}. See you then!`;
+    S.done = { address: addr, start, end, who, sms: 'sms:' + ((agent && agent.phone) || '') + '?&body=' + encodeURIComponent(body) };
+    S.notice = { err: false, text: 'Saved.' };
+    await loadAll();
+    render();
+  });
+}
+
+function renderShoots() {
+  const rows = S.shoots.map((s) => `<tr class="pick ${S.sel && S.sel.id === s.id ? 'sel' : ''}" data-id="${esc(s.id)}">
+  <td>${esc(s.address)}${s.city ? ', ' + esc(s.city) : ''}</td><td>${esc(s.agents ? s.agents.name : s.contact_name || '')}</td>
+  <td>${esc(fmtDate(s.shoot_start))}</td><td><span class="chip">${esc(s.status)}</span></td></tr>`).join('');
+  const list = `<div class="card scroll" style="padding:0"><table><thead><tr><th>Address</th><th>Agent</th><th>Shoot</th><th>Status</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="mut">No shoots yet.</td></tr>'}</tbody></table></div>`;
+  return `<h1>Shoots</h1><p class="sub">Click a shoot to see the money, links and expenses.</p><div class="cols"><div class="l">${list}</div><div class="r" id="detail">${renderDetail()}</div></div>`;
+}
+
+function renderDetail() {
+  const s = S.sel;
+  if (!s) return '<div class="card mut">Pick a shoot from the list.</div>';
+  const c = calc(s.price, s.sqft);
+  const exp = S.expenses.reduce((t, e) => t + Number(e.amount), 0);
+  const expRows = S.expenses.map((e) => `<div><span class="mut">${esc(CATS[e.category] || e.category)}${e.description ? ' ' + esc(e.description) : ''}</span><span>${money(e.amount)}</span></div>`).join('');
+  const q = encodeURIComponent(s.address + (s.city ? ' ' + s.city : ''));
+  return `<div class="card"><h2>${esc(s.address)}</h2>
+  <div class="field"><label for="d-status">Status</label><select id="d-status">${STATUSES.map((x) => `<option ${x === s.status ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+  <div class="field"><label for="d-iguide">iGuide link</label><input id="d-iguide" value="${esc(s.iguide_url || '')}"></div>
+  <div class="field"><label for="d-video">Video link</label><input id="d-video" value="${esc(s.video_url || '')}"></div>
+  <div class="row"><div class="field"><label for="d-sdate">Sold date</label><input id="d-sdate" type="date" value="${esc(s.sold_date || '')}"></div>
+  <div class="field"><label for="d-sprice">Sold price</label><input id="d-sprice" inputmode="decimal" value="${esc(s.sold_price == null ? '' : s.sold_price)}"></div></div>
+  <button class="btn" id="d-save">Save changes</button>
+  <div class="btnrow"><a class="btn alt small" style="text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/search?q=${q}+sold+housesigma">Search HouseSigma</a>
+  <a class="btn alt small" style="text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/search?q=${q}+realtor.ca">Search Realtor.ca</a></div></div>
+  <div class="card"><h2>Money</h2><div class="money">
+  <div><span class="mut">Photography</span><span>${money(s.price)}</span></div>
+  <div><span class="mut">iGuide charged${s.sqft ? ' (' + s.sqft + ' sq ft)' : ''}</span><span>${money(c.iguideCharge)}</span></div>
+  <div><span class="mut">HST collected</span><span>${money(c.hst)}</span></div>
+  ${expRows}<div><span class="mut">Total expenses</span><span>${money(exp)}</span></div>
+  <div class="t"><span>Profit before tax</span><span>${money(c.subtotal - exp)}</span></div></div>
+  <h2>Add an expense</h2><div class="field"><label for="x-cat">Category</label><select id="x-cat">${Object.entries(CATS).map(([k, n]) => `<option value="${k}">${n}</option>`).join('')}</select></div>
+  <div class="row"><div class="field"><label for="x-amt">Amount before HST</label><input id="x-amt" inputmode="decimal"></div>
+  <div class="field"><label for="x-hst">HST paid</label><input id="x-hst" inputmode="decimal" value="0"></div></div>
+  <button class="btn alt" id="x-add">Add expense</button></div>`;
+}
+
+function bindShoots() {
+  document.querySelectorAll('tr.pick').forEach((tr) => tr.addEventListener('click', async () => {
+    S.sel = S.shoots.find((x) => x.id === tr.dataset.id);
+    const { data } = await db.from('expenses').select('*').eq('shoot_id', S.sel.id).order('expense_date');
+    S.expenses = data || [];
+    render();
+  }));
+  if (!S.sel) return;
+  $('d-save').addEventListener('click', async () => {
+    const patch = {
+      status: $('d-status').value,
+      iguide_url: $('d-iguide').value.trim() || null,
+      video_url: $('d-video').value.trim() || null,
+      sold_date: $('d-sdate').value || null,
+      sold_price: $('d-sprice').value ? num($('d-sprice').value) : null
+    };
+    const { error } = await db.from('shoots').update(patch).eq('id', S.sel.id);
+    if (error) { S.notice = { err: true, text: 'Could not save: ' + error.message }; render(); return; }
+    const id = S.sel.id;
+    await loadAll();
+    S.sel = S.shoots.find((x) => x.id === id);
+    S.notice = { err: false, text: 'Saved.' };
+    render();
+  });
+  $('x-add').addEventListener('click', async () => {
+    if (!$('x-amt').value) return;
+    const { error } = await db.from('expenses').insert({ shoot_id: S.sel.id, category: $('x-cat').value, amount: num($('x-amt').value), hst_paid: num($('x-hst').value) });
+    if (error) { S.notice = { err: true, text: 'Could not add expense: ' + error.message }; render(); return; }
+    const { data } = await db.from('expenses').select('*').eq('shoot_id', S.sel.id).order('expense_date');
+    S.expenses = data || [];
+    S.notice = null;
+    render();
+  });
+}
+
+function renderAgents() {
+  const rows = S.agents.map((a) => `<tr><td>${esc(a.name)}</td><td>${esc(a.phone || '')}</td><td>${esc(a.usual_package || '')}</td><td>${a.usual_price != null ? money(a.usual_price) : ''}</td></tr>`).join('');
+  return `<h1>Agents</h1><p class="sub">Your usual package and price pre-fill a new booking.</p>
+  <div class="card"><h2>Add an agent</h2><div class="row"><div class="field"><label for="a-name">Name</label><input id="a-name"></div>
+  <div class="field"><label for="a-phone">Phone</label><input id="a-phone" inputmode="tel"></div></div>
+  <div class="row"><div class="field"><label for="a-email">Email</label><input id="a-email" type="email"></div>
+  <div class="field"><label for="a-pkg">Usual package</label><input id="a-pkg"></div>
+  <div class="field"><label for="a-price">Usual price</label><input id="a-price" inputmode="decimal"></div></div>
+  <button class="btn" id="a-save">Add agent</button></div>
+  <div class="card scroll" style="padding:0"><table><thead><tr><th>Name</th><th>Phone</th><th>Package</th><th>Price</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="mut">No agents yet.</td></tr>'}</tbody></table></div>`;
+}
+
+function bindAgents() {
+  $('a-save').addEventListener('click', async () => {
+    const name = $('a-name').value.trim();
+    if (!name) { S.notice = { err: true, text: 'Name is required.' }; render(); return; }
+    const { error } = await db.from('agents').insert({
+      name, phone: $('a-phone').value.trim() || null, email: $('a-email').value.trim() || null,
+      usual_package: $('a-pkg').value.trim() || null, usual_price: $('a-price').value ? num($('a-price').value) : null
+    });
+    if (error) { S.notice = { err: true, text: 'Could not save: ' + error.message }; render(); return; }
+    await loadAll();
+    S.notice = { err: false, text: 'Agent added.' };
+    render();
+  });
+}
+
+function render() {
+  const body = S.tab === 'booking' ? renderBooking() : S.tab === 'shoots' ? renderShoots() : renderAgents();
+  app.innerHTML = shell(body);
+  bindShell();
+  if (S.tab === 'booking') bindBooking();
+  else if (S.tab === 'shoots') bindShoots();
+  else bindAgents();
+}
+
+async function start(session) {
+  if (!session) { renderLogin(); return; }
+  await loadAll();
+  render();
+}
+
+db.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') start(session);
+});
+</script>
+</body>
+</html>
